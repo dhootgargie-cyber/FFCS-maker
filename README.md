@@ -1,4 +1,6 @@
 # FFCS Maker
+<img width="1332" alt="FFCS Maker Timetable" src="https://github.com/user-attachments/assets/c7f4149b-2ed2-44e7-98d5-fd8427f1333f" />
+
 
 Timetable constraint-satisfaction platform for VIT's Fully Flexible Credit System. Pick courses, add the faculty/slot options you can register for, and the solver returns clash-free timetables.
 

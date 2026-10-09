@@ -1,0 +1,18 @@
+services:
+  server:
+    build: ./server
+    environment:
+      PORT: 5000
+      # Same-origin POSTs through nginx still send an Origin header,
+      # so the public URL of the client must be on the allowlist.
+      ALLOWED_ORIGINS: http://localhost:8080
+      BODY_LIMIT: 100kb
+    restart: unless-stopped
+
+  client:
+    build: ./client
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+    restart: unless-stopped

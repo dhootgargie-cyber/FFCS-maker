@@ -1,4 +1,5 @@
 # FFCS Maker
+   [![CI](https://github.com/dhootgargie-cyber/FFCS-maker/actions/workflows/ci.yml/badge.svg)](https://github.com/dhootgargie-cyber/FFCS-maker/actions/workflows/ci.yml)
 <img width="1332" alt="FFCS Maker Timetable" src="https://github.com/user-attachments/assets/c7f4149b-2ed2-44e7-98d5-fd8427f1333f" />
 
 

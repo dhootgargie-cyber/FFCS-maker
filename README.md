@@ -57,4 +57,9 @@ Covers CORS behaviour, security headers, rate-limiter isolation, payload limits,
 
 ## Slot chart
 
-The chart in `server/src/solver/slots.js` is a simplified Mon-Fri model written from memory. **Verify it against the current VIT slot chart for your semester** and edit `THEORY_CHART` / `LAB_CHART` if needed. The solver only depends on the slot-to-period mapping.
+The slot chart is **data, not code**: `server/src/solver/slotChart.json`. Slot charts change every semester and differ by campus, so updating it never requires touching the solver.
+
+- The bundled chart is a **simplified reference chart (unverified)**. Replace it with the official chart for your semester and campus before relying on the results.
+- Point `SLOT_CHART_PATH` at a different JSON file to load another chart without editing the repo.
+- The chart is validated at startup (day rows, period counts, slot names). A malformed chart fails fast with a clear error instead of producing wrong timetables.
+- Format: `days`, `periodTimes`, and `theory` / `lab` grids listing the slot for each period of each day (`null` = no slot). See the header comment in `server/src/solver/slots.js`.

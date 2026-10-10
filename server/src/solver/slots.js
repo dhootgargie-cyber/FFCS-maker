@@ -1,59 +1,69 @@
 /**
- * VIT FFCS slot chart (simplified: Mon-Fri, theory + lab periods).
+ * Slot chart loader.
  *
- * Each period is identified as "DAY-N" where N is 1..12:
- *   1-6  = morning periods (08:00 onward)
- *   7-12 = afternoon periods (14:00 onward)
+ * The chart itself lives in data, not code: see slotChart.json. Slot charts
+ * change every semester (and differ by campus), so swapping the chart means
+ * replacing one JSON file, or pointing SLOT_CHART_PATH at another one.
  *
- * NOTE: Slot charts change between semesters. Verify against the current
- * VIT chart and edit THEORY_CHART / LAB_CHART below if needed. The solver
- * only depends on the slot -> periods mapping produced here.
+ * Chart format:
+ *   {
+ *     "meta":        { name, campus, note },          // free-form, optional
+ *     "days":        ["MON", ...],
+ *     "periodTimes": { "1": "08:00-08:50", ... },     // defines the period count
+ *     "theory":      { "MON": [slot|null x periods], ... },
+ *     "lab":         { "MON": [slot|null x periods], ... }
+ *   }
+ *
+ * A period is identified as "DAY-N", e.g. "MON-1". A slot such as "A1" can
+ * occupy several periods; the solver only needs the slot -> periods mapping.
  */
 
-const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+const fs = require('fs');
+const path = require('path');
 
-const PERIOD_TIMES = {
-  1: '08:00-08:50',
-  2: '09:00-09:50',
-  3: '10:00-10:50',
-  4: '11:00-11:50',
-  5: '12:00-12:50',
-  6: '13:00-13:50',
-  7: '14:00-14:50',
-  8: '15:00-15:50',
-  9: '16:00-16:50',
-  10: '17:00-17:50',
-  11: '18:00-18:50',
-  12: '19:00-19:50',
-};
+const DEFAULT_CHART_PATH = path.join(__dirname, 'slotChart.json');
 
-// Theory slots per day, listed by period 1..12. null = no theory slot.
-const THEORY_CHART = {
-  MON: ['A1', 'F1', 'D1', 'TB1', 'TG1', null, 'A2', 'F2', 'D2', 'TB2', 'TG2', null],
-  TUE: ['B1', 'G1', 'E1', 'TC1', 'TAA1', null, 'B2', 'G2', 'E2', 'TC2', 'TAA2', null],
-  WED: ['C1', 'A1', 'F1', 'V1', 'V2', null, 'C2', 'A2', 'F2', 'TD2', 'TBB2', null],
-  THU: ['D1', 'B1', 'G1', 'TE1', 'TCC1', null, 'D2', 'B2', 'G2', 'TE2', 'TCC2', null],
-  FRI: ['E1', 'C1', 'TA1', 'TF1', 'TD1', null, 'E2', 'C2', 'TA2', 'TF2', 'TDD2', null],
-};
+/** Throws a descriptive Error if the chart is malformed. */
+function validateChart(chart) {
+  const fail = (msg) => {
+    throw new Error(`Invalid slot chart: ${msg}`);
+  };
+  if (!chart || typeof chart !== 'object') fail('chart must be an object');
 
-// Lab slots: L1..L60, 6 per half-day. Morning = L1-L30, afternoon = L31-L60.
-function buildLabChart() {
-  const chart = {};
-  DAYS.forEach((day, d) => {
-    chart[day] = [];
-    for (let p = 0; p < 6; p++) chart[day].push(`L${d * 6 + p + 1}`);
-    for (let p = 0; p < 6; p++) chart[day].push(`L${30 + d * 6 + p + 1}`);
-  });
+  const { days, periodTimes } = chart;
+  if (!Array.isArray(days) || days.length === 0) fail('"days" must be a non-empty array');
+  if (new Set(days).size !== days.length) fail('"days" contains duplicates');
+  if (!periodTimes || typeof periodTimes !== 'object') fail('"periodTimes" must be an object');
+
+  const periodCount = Object.keys(periodTimes).length;
+  if (periodCount === 0) fail('"periodTimes" must define at least one period');
+
+  for (const section of ['theory', 'lab']) {
+    const grid = chart[section];
+    if (!grid || typeof grid !== 'object') fail(`"${section}" must be an object`);
+    for (const day of days) {
+      const row = grid[day];
+      if (!Array.isArray(row)) fail(`${section}.${day} must be an array`);
+      if (row.length !== periodCount) {
+        fail(`${section}.${day} has ${row.length} entries, expected ${periodCount}`);
+      }
+      for (const slot of row) {
+        if (slot === null) continue;
+        if (typeof slot !== 'string' || !slot.trim()) fail(`${section}.${day} has a non-string slot`);
+        if (slot.includes('+')) fail(`slot "${slot}" must not contain "+"`);
+        if (slot !== slot.toUpperCase()) fail(`slot "${slot}" must be upper-case`);
+      }
+    }
+  }
   return chart;
 }
-const LAB_CHART = buildLabChart();
 
 /** slot name -> array of period ids, e.g. A1 -> ["MON-1", "WED-2"] */
-function buildSlotMap() {
+function buildSlotMap(chart) {
   const map = new Map();
-  for (const chart of [THEORY_CHART, LAB_CHART]) {
-    for (const day of DAYS) {
-      chart[day].forEach((slot, i) => {
+  for (const section of [chart.theory, chart.lab]) {
+    for (const day of chart.days) {
+      section[day].forEach((slot, i) => {
         if (!slot) return;
         if (!map.has(slot)) map.set(slot, []);
         map.get(slot).push(`${day}-${i + 1}`);
@@ -63,40 +73,72 @@ function buildSlotMap() {
   return map;
 }
 
-const SLOT_MAP = buildSlotMap();
-
-function isKnownSlot(slot) {
-  return SLOT_MAP.has(slot);
+function readChartFile(file) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new Error(`Cannot read slot chart at ${file}: ${err.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Slot chart at ${file} is not valid JSON: ${err.message}`);
+  }
 }
 
 /**
- * Parse a slot expression like "A1+TA1" or "L1+L2" into a Set of period ids.
- * Throws on unknown slot names.
+ * Build a slot "engine" from a chart object. Exposed so tests (and, later,
+ * per-campus charts) can create engines without touching module state.
  */
-function periodsFor(slotExpr) {
-  const periods = new Set();
-  const parts = String(slotExpr)
-    .split('+')
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-  if (parts.length === 0) throw new Error('Empty slot expression');
-  for (const part of parts) {
-    if (!SLOT_MAP.has(part)) throw new Error(`Unknown slot: ${part}`);
-    for (const p of SLOT_MAP.get(part)) periods.add(p);
-  }
-  return periods;
+function createSlotEngine(chart) {
+  validateChart(chart);
+  const slotMap = buildSlotMap(chart);
+
+  return {
+    meta: chart.meta || {},
+    days: chart.days,
+    periodTimes: chart.periodTimes,
+    isKnownSlot: (slot) => slotMap.has(slot),
+    /**
+     * Parse a slot expression like "A1+TA1" or "L1+L2" into a Set of period
+     * ids. Throws on empty expressions and unknown slot names.
+     */
+    periodsFor(slotExpr) {
+      const periods = new Set();
+      const parts = String(slotExpr)
+        .split('+')
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean);
+      if (parts.length === 0) throw new Error('Empty slot expression');
+      for (const part of parts) {
+        if (!slotMap.has(part)) throw new Error(`Unknown slot: ${part}`);
+        for (const p of slotMap.get(part)) periods.add(p);
+      }
+      return periods;
+    },
+    listSlots: () => [...slotMap.entries()].map(([slot, periods]) => ({ slot, periods })),
+  };
 }
 
-function listSlots() {
-  return [...SLOT_MAP.entries()].map(([slot, periods]) => ({ slot, periods }));
-}
+// Default engine, loaded once at startup. A bad chart fails fast with a clear
+// message instead of producing wrong timetables later.
+const chartPath = process.env.SLOT_CHART_PATH || DEFAULT_CHART_PATH;
+const defaultChart = readChartFile(chartPath);
+const engine = createSlotEngine(defaultChart);
 
 module.exports = {
-  DAYS,
-  PERIOD_TIMES,
-  THEORY_CHART,
-  LAB_CHART,
-  isKnownSlot,
-  periodsFor,
-  listSlots,
+  // Default-engine API (what the solver and routes use)
+  DAYS: engine.days,
+  PERIOD_TIMES: engine.periodTimes,
+  CHART_META: engine.meta,
+  isKnownSlot: engine.isKnownSlot,
+  periodsFor: engine.periodsFor,
+  listSlots: engine.listSlots,
+  // Raw sections, kept for backwards compatibility
+  THEORY_CHART: defaultChart.theory,
+  LAB_CHART: defaultChart.lab,
+  // Building blocks
+  createSlotEngine,
+  validateChart,
 };
